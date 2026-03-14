@@ -1,8 +1,9 @@
 #pragma once
 
 #include <memory>
+#include <string>
 
-#include "bmp.hpp"
+#include <bmp.hpp>
 
 namespace bmp {
 
@@ -23,10 +24,7 @@ public:
 
     BmpFromCLIFactory(int color) : color_(color) { }
 
-    std::unique_ptr<BMP> CreatePicture() const override {
-        std::cout << "From BmpFromCLIFactory, color = " << color_ << std::endl;
-        return std::make_unique<BMP>();
-    } 
+    std::unique_ptr<BMP> CreatePicture() const override;
 
 private:
     int color_;
@@ -38,10 +36,7 @@ public:
 
     BmpFromFile(std::string file_path) : file_path_(file_path) { }
 
-    std::unique_ptr<BMP> CreatePicture() const override {
-        std::cout << "From BmpFromFile, file_path = " << file_path_ << std::endl;
-        return std::make_unique<BMP>();
-    } 
+    std::unique_ptr<BMP> CreatePicture() const override;
 
 private:
     std::string file_path_;

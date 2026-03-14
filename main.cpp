@@ -3,8 +3,8 @@
 
 #include <boost/program_options.hpp>
 
-#include "bmp.hpp"
-#include "bmp_factory.hpp"
+#include <bmp.hpp>
+#include <bmp_factories/bmp_factory.hpp>
 
 namespace po = boost::program_options;
 

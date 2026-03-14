@@ -1,5 +1,10 @@
-all: init-boost
-
-init-boost:
-	git submodule add https://github.com/boostorg/boost.git external/boost
+init-third-party:
 	git submodule update --init --recursive
+
+build-image-processor:
+	cmake -B build .
+	cmake --build build
+
+build-tests:
+	cmake -B build -DWITH_TESTS=ON .
+	cmake --build build

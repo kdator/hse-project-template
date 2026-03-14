@@ -1,4 +1,6 @@
-#include "bmp.hpp"
+#pragma once
+
+#include <bmp.hpp>
 
 class Filter {
 public:
