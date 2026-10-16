@@ -1,22 +1,120 @@
-# MathDemo — учебный проект на C++ с CMake
+# Учебный проект на C++ с CMake
 
-## Структура проекта
+В репозитории два независимых примера. Каждый лежит в своей папке, имеет свой
+корневой `CMakeLists.txt` и собирается как отдельный проект; корневой
+`CMakeLists.txt` репозитория нужен, чтобы при желании собрать всё сразу.
+
+| Папка | Цель | Что демонстрирует |
+|-------|------|-------------------|
+| [`math-example/`](math-example/) | `demo` | основы CMake: статическая библиотека, `add_subdirectory`, линковка |
+| [`strategy-example/`](strategy-example/) | `filereader` | сторонние зависимости и паттерн Strategy (см. [часть 2](#часть-2--сторонние-библиотеки-и-паттерн-strategy)) |
+
+## Структура репозитория
 
 ```
-MathDemo/
-├── CMakeLists.txt       ← корневой файл сборки
-├── main.cpp             ← точка входа программы
-└── math/                ← подпапка-библиотека
-    ├── CMakeLists.txt   ← файл сборки библиотеки
-    ├── include/         ← заголовочные файлы (.hpp)
-    │   ├── multiply.hpp
-    │   ├── divide.hpp
-    │   └── power.hpp
-    └── src/             ← файлы реализации (.cpp)
-        ├── multiply.cpp
-        ├── divide.cpp
-        └── power.cpp
+hse-project-template/
+├── CMakeLists.txt                  ← корень: только add_subdirectory для обоих примеров
+├── Makefile                        ← обёртка над cmake: make build-math и т. д.
+│
+├── math-example/                   ← ПРИМЕР 1
+│   ├── CMakeLists.txt              ← корневой файл сборки примера
+│   ├── main.cpp                    ← точка входа demo
+│   └── math/                       ← подпапка-библиотека
+│       ├── CMakeLists.txt          ← файл сборки библиотеки
+│       ├── include/                ← заголовочные файлы (.hpp)
+│       │   ├── multiply.hpp
+│       │   ├── divide.hpp
+│       │   └── power.hpp
+│       └── src/                    ← файлы реализации (.cpp)
+│           ├── multiply.cpp
+│           ├── divide.cpp
+│           └── power.cpp
+│
+└── strategy-example/               ← ПРИМЕР 2
+    ├── CMakeLists.txt              ← корневой файл сборки примера
+    ├── cmake/
+    │   └── Dependencies.cmake      ← подключение сторонних библиотек (FetchContent)
+    ├── app/
+    │   └── main.cpp                ← CLI filereader: разбор argv, выбор стратегии
+    ├── reader/                     ← библиотека стратегий чтения
+    │   ├── CMakeLists.txt
+    │   ├── include/
+    │   │   ├── read_strategy.hpp       ← интерфейс IReadStrategy
+    │   │   ├── json_strategy.hpp
+    │   │   ├── xlsx_strategy.hpp
+    │   │   └── strategy_factory.hpp
+    │   └── src/
+    │       ├── json_strategy.cpp       ← nlohmann/json
+    │       ├── xlsx_strategy.cpp       ← OpenXLSX
+    │       └── strategy_factory.cpp
+    └── data/                       ← тестовые файлы
+        ├── employees.xlsx
+        └── config.json
 ```
+
+## Сборка: три равноправных способа
+
+**1. Через Makefile** — короткие команды на каждый день. Сам Makefile ничего
+не компилирует, он только вызывает `cmake`:
+
+```bash
+make build-math                # собрать пример 1         → build-math/bin/demo
+make build-strategy-example    # собрать пример 2         → build-strategy/bin/filereader
+make build-all                 # собрать всё из корня     → build/bin/{demo,filereader}
+make run-math                  # собрать и запустить demo
+make run-strategy-example      # собрать и запустить filereader на тестовых данных
+make clean                     # удалить все папки сборки
+make                           # = build-math + build-strategy-example
+```
+
+**2. Отдельный пример напрямую** — именно так студент собирал бы его, если бы
+скачал одну папку:
+
+```bash
+cmake -S math-example -B build-math && cmake --build build-math -j
+./build-math/bin/demo
+```
+
+**3. Всё из корня репозитория** — корневой `CMakeLists.txt` подключает обе папки
+через `add_subdirectory`:
+
+```bash
+cmake -S . -B build && cmake --build build -j
+./build/bin/demo
+./build/bin/filereader strategy-example/data/employees.xlsx
+```
+
+> У каждой команды **своя папка сборки**, и это обязательное требование CMake:
+> в папке сборки лежит кэш `CMakeCache.txt` с путём к исходникам и всеми
+> настройками, поэтому два разных проекта в одну папку конфигурировать нельзя.
+> Отсюда три разные папки: `build-math/`, `build-strategy/` и `build/`.
+> Все они перечислены в `.gitignore` — результаты сборки в git не попадают.
+
+### Что именно делает корневой `CMakeLists.txt`
+
+```cmake
+cmake_minimum_required(VERSION 3.16)
+project(HseProjectTemplate CXX)
+
+add_subdirectory(math-example)
+add_subdirectory(strategy-example)
+```
+
+Своих целей у него нет. Внутри каждой подпапки вызывается **свой** `project()` —
+вложенные проекты в CMake разрешены и ведут себя так:
+
+| | при отдельной сборке | при сборке из корня |
+|---|---|---|
+| `PROJECT_SOURCE_DIR` | папка примера | папка примера (у каждого свой) |
+| `CMAKE_SOURCE_DIR` | папка примера | корень репозитория |
+| `CMAKE_BINARY_DIR` | `build-math/` | `build/` |
+
+Главное следствие: **граф целей у всего дерева общий**. Цели `demo`, `math`,
+`reader`, `filereader`, `project_warnings` живут в одном пространстве имён,
+поэтому две цели с одинаковым именем в разных подпапках дадут ошибку
+конфигурации. Переменные же, наоборот, у каждой подпапки свои: `add_subdirectory`
+создаёт дочернюю область видимости, и настройки одного примера не протекают
+в другой.
 
 ---
 
@@ -179,18 +277,21 @@ CMake **не компилирует** код сам. Он читает `CMakeLis
 
 ---
 
-## Сборка и запуск
+## Сборка и запуск первой части
 
 ```bash
 # создаём папку для файлов сборки (чтобы не засорять исходники)
-cmake -S . -B build
+# -S — где лежат исходники, -B — куда класть файлы сборки
+cmake -S math-example -B build-math
 
 # компилируем
-cmake --build build
+cmake --build build-math
 
-# запускаем
-./build/demo
+# запускаем (куда положить исполняемый файл, задаёт CMAKE_RUNTIME_OUTPUT_DIRECTORY)
+./build-math/bin/demo
 ```
+
+То же самое одной командой: `make run-math`.
 
 Ожидаемый вывод:
 
@@ -199,3 +300,457 @@ cmake --build build
 3 / 4 = 0.75
 3^3 = 27
 ```
+
+---
+---
+
+# Часть 2 — сторонние библиотеки и паттерн Strategy
+
+Вторая часть проекта — консольная утилита `filereader`. Она получает список файлов
+в аргументах командной строки, для каждого файла выбирает подходящий способ чтения
+и печатает содержимое в консоль:
+
+```bash
+./build-strategy/bin/filereader strategy-example/data/employees.xlsx strategy-example/data/config.json
+```
+
+Используются две сторонние библиотеки:
+
+| Библиотека | Назначение | Тип |
+|------------|-----------|-----|
+| [nlohmann/json](https://github.com/nlohmann/json) | разбор и вывод JSON | header-only |
+| [OpenXLSX](https://github.com/troldal/OpenXLSX) | чтение файлов `.xlsx` | компилируемая (статическая) |
+
+---
+
+## Как подключают сторонние библиотеки
+
+Чужая библиотека — это такие же `.hpp` и `.cpp` файлы, как наши. Вопрос только
+в том, **откуда они берутся на машине, где идёт сборка**. Есть три рабочих подхода.
+
+### 1. `find_package` — библиотека уже установлена в системе
+
+[Документация](https://cmake.org/cmake/help/latest/command/find_package.html)
+
+```cmake
+find_package(nlohmann_json 3.11 REQUIRED)
+target_link_libraries(reader PRIVATE nlohmann_json::nlohmann_json)
+```
+
+CMake ищет на диске файл `nlohmann_jsonConfig.cmake`, который библиотека положила
+при установке (`apt install nlohmann-json3-dev`, `brew install`, vcpkg, conan).
+Из этого файла CMake узнаёт пути к заголовкам, к `.a`/`.so` и к зависимостям.
+
+- **Плюсы:** ничего не качается и не собирается, сборка проекта мгновенная.
+- **Минусы:** нужно, чтобы кто-то установил библиотеку заранее; версия на каждой
+  машине своя. Классическая проблема «у меня собирается, у тебя нет».
+
+### 2. `FetchContent` — CMake сам скачивает исходники
+
+[Документация](https://cmake.org/cmake/help/latest/module/FetchContent.html)
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG        v3.12.0)
+FetchContent_MakeAvailable(nlohmann_json)
+```
+
+На этапе **configure** (`cmake -S . -B build`) CMake клонирует репозиторий
+в `build/_deps/` и вызывает для него `add_subdirectory`. Дальше чужая библиотека —
+обычный подпроект: её цели (`nlohmann_json::nlohmann_json`, `OpenXLSX::OpenXLSX`)
+доступны так же, как наша `math`.
+
+```
+build/_deps/
+├── nlohmann_json-src/     ← скачанные исходники
+├── nlohmann_json-build/   ← результаты сборки
+├── nlohmann_json-subbuild/← служебные файлы загрузчика
+├── openxlsx-src/
+└── openxlsx-build/
+```
+
+- **Плюсы:** работает на любой машине без предварительной установки; версия
+  зафиксирована в `GIT_TAG` → сборка воспроизводима у всех одинаково.
+- **Минусы:** при первой конфигурации нужен интернет, первая сборка долгая
+  (собирается не только наш код, но и библиотека).
+
+> **Всегда указывайте тег, а не ветку.** `GIT_TAG master` означает, что завтра
+> у вас соберётся другой код, чем сегодня, и никто не поймёт, почему «вчера работало».
+> `GIT_SHALLOW TRUE` просит git скачать один коммит вместо всей истории.
+
+### 3. `git submodule` — исходники внутри нашего репозитория
+
+```bash
+git submodule add https://github.com/nlohmann/json external/json
+```
+
+```cmake
+add_subdirectory(external/json)
+```
+
+В репозитории сохраняется не код библиотеки, а ссылка на конкретный коммит
+её репозитория.
+
+- **Плюсы:** после клонирования интернет не нужен; версия жёстко зафиксирована в git.
+- **Минусы:** клонировать нужно с `git clone --recursive` (все забывают),
+  обновление версии — отдельная ручная операция, история репозитория усложняется.
+
+### Что выбрано в этом проекте
+
+```cmake
+find_package(nlohmann_json 3.11 QUIET)      # если библиотека есть в системе — берём её
+if(NOT nlohmann_json_FOUND)
+    FetchContent_Declare(nlohmann_json ...) # иначе скачиваем
+    FetchContent_MakeAvailable(nlohmann_json)
+endif()
+```
+
+Это стандартный гибридный паттерн: быстро там, где библиотека установлена,
+и работает «из коробки» там, где её нет. Для OpenXLSX используется просто
+`FetchContent` — в системных репозиториях её обычно нет вовсе.
+
+Весь код подключения зависимостей собран в [`strategy-example/cmake/Dependencies.cmake`](strategy-example/cmake/Dependencies.cmake)
+и подключается в `strategy-example/CMakeLists.txt` одной строкой через
+[`include`](https://cmake.org/cmake/help/latest/command/include.html).
+
+> `include(файл.cmake)` исполняет команды файла **в текущей области видимости**,
+> а `add_subdirectory(папка)` — в новой дочерней области. Поэтому переменные,
+> заданные внутри подпапки, наружу не видны, а заданные в `include`-файле — видны.
+
+---
+
+## Header-only и компилируемая библиотека
+
+Это два принципиально разных вида зависимости, и в CMake они выглядят по-разному.
+
+| | header-only (`nlohmann/json`) | компилируемая (`OpenXLSX`) |
+|---|---|---|
+| Где лежит код | целиком в `.hpp` | объявления в `.hpp`, реализация в `.cpp` |
+| Что получается при сборке | ничего | `libOpenXLSX.a` |
+| Что значит «слинковаться» | получить путь к заголовкам и флаги | получить путь к заголовкам **и** приложить `.a` к линковке |
+| Цель в CMake | `add_library(... INTERFACE)` | `add_library(... STATIC)` |
+| Цена | каждый `.cpp` компилирует библиотеку заново → медленная компиляция | один раз собрали `.a` → быстрая компиляция |
+
+Поэтому `#include <nlohmann/json.hpp>` увеличивает время компиляции файла
+на секунды: вместе с нашим кодом компилятор каждый раз обрабатывает ~25 тысяч
+строк шаблонов. А `#include <OpenXLSX.hpp>` даёт компилятору только объявления,
+машинный код приходит готовым из `libOpenXLSX.a` на этапе линковки.
+
+У OpenXLSX есть и **свои** зависимости: `miniz` (распаковка zip) и `pugixml`
+(разбор XML) — файл `.xlsx` это zip-архив с XML внутри. Мы их не упоминаем нигде
+в своём коде: CMake знает про них из графа целей и сам передаст линковщику.
+Опция `FETCH_DEPS_AUTO ON` в `Dependencies.cmake` разрешает OpenXLSX скачать их
+самостоятельно (иначе она потребует, чтобы они были предустановлены в системе).
+
+---
+
+## `PUBLIC`, `PRIVATE`, `INTERFACE`
+
+[Документация](https://cmake.org/cmake/help/latest/command/target_link_libraries.html)
+
+Эти ключевые слова отвечают на два независимых вопроса:
+
+| Ключевое слово | Нужна при сборке самой цели? | Передаётся тем, кто линкуется с целью? |
+|----------------|------------------------------|----------------------------------------|
+| `PRIVATE` | да | **нет** |
+| `PUBLIC` | да | да |
+| `INTERFACE` | **нет** | да |
+
+Передаются (наследуются транзитивно) все **требования использования**: пути
+к заголовкам, макросы `-D`, флаги компиляции, стандарт C++ и сами библиотеки
+для линковки.
+
+### Правило выбора
+
+Посмотрите на **публичные заголовки** своей цели:
+
+- тип из сторонней библиотеки встречается в вашем `.hpp` (поле класса, параметр,
+  тип возврата) → **`PUBLIC`**: иначе ваш `.hpp` не скомпилируется у пользователя;
+- библиотека упоминается только в `.cpp` → **`PRIVATE`**;
+- у вашей цели вообще нет `.cpp` (header-only) → **`INTERFACE`**.
+
+### Как это сделано здесь
+
+```cmake
+target_link_libraries(reader
+    PRIVATE
+        nlohmann_json::nlohmann_json
+        OpenXLSX::OpenXLSX
+        project_warnings)
+```
+
+Обе зависимости `PRIVATE`, потому что заголовки `reader/include/*.hpp`
+не упоминают ни `nlohmann::json`, ни `OpenXLSX::XLDocument` — интерфейс
+`IReadStrategy` описан через `std::string`. Это не формальность, а два
+практических следствия:
+
+1. `app/main.cpp` компилируется, вообще не видя заголовков сторонних библиотек, —
+   и компилируется быстро;
+2. замену OpenXLSX на другую xlsx-библиотеку можно сделать внутри одного файла
+   `reader/src/xlsx_strategy.cpp`, не затронув ни одного файла снаружи.
+
+**Важно:** `PRIVATE` скрывает **заголовки**, но не отменяет линковку.
+Объектный код из `libOpenXLSX.a` всё равно нужен, чтобы собрать `filereader`,
+и CMake сам передаст его линковщику (в экспортируемых целях это видно как
+`$<LINK_ONLY:...>`). Проверить граф можно так:
+
+```bash
+cmake --graphviz=deps.dot -S . -B build   # сгенерирует граф зависимостей целей
+```
+
+### Транзитивные зависимости
+
+```
+filereader                         ← мы линкуем только reader
+   └── reader                      PRIVATE
+         ├── nlohmann_json         (header-only, заголовки дальше не идут)
+         └── OpenXLSX              (libOpenXLSX.a — попадёт в filereader)
+               ├── miniz           ← зависимость зависимости
+               └── pugixml         ← зависимость зависимости
+```
+
+| Что наследует `filereader` | Наследует? |
+|---------------------------|-----------|
+| путь к `reader/include/` | да — он объявлен `PUBLIC` в `reader` |
+| путь к заголовкам `OpenXLSX` | нет — объявлен `PRIVATE` в `reader` |
+| объектный код `OpenXLSX`, `miniz`, `pugixml` | да — линковщику он необходим |
+
+Именно это и называют транзитивностью: вы пишете одну строку
+`target_link_libraries(filereader PRIVATE reader)`, а CMake достраивает остальное
+по графу целей — в правильном порядке и без дублей.
+
+### `INTERFACE`-библиотека на практике
+
+`project_warnings` в `strategy-example/CMakeLists.txt` — цель без единого `.cpp`:
+
+```cmake
+add_library(project_warnings INTERFACE)
+target_compile_options(project_warnings INTERFACE -Wall -Wextra -Wpedantic)
+```
+
+Она ничего не компилирует и ничего не линкует — только раздаёт флаги тем целям,
+которые с ней слинкованы. Так флаги не дублируются в каждой цели, и, что важнее,
+они **не попадают в сторонний код**: `OpenXLSX` собирается со своими настройками,
+и наш `-Wextra` не заваливает лог предупреждениями из чужих заголовков.
+
+---
+
+## Паттерн Strategy
+
+### Задача
+
+Программа должна читать файлы разных форматов. Алгоритм чтения у каждого формата
+свой, но вызывающий код во всех случаях делает одно и то же: «прочитай файл
+и выведи его в консоль».
+
+Решение «в одну функцию» выглядит так:
+
+```cpp
+void read(const std::string& path) {
+    if (ext == ".json")      { /* ...50 строк nlohmann/json... */ }
+    else if (ext == ".xlsx") { /* ...80 строк OpenXLSX...      */ }
+    else if (ext == ".sql")  { /* ...и так далее               */ }
+}
+```
+
+Чем это плохо: функция растёт при каждом новом формате; в один файл стягиваются
+все сторонние библиотеки сразу; правка одного формата заставляет перекомпилировать
+код всех остальных; протестировать один формат отдельно нельзя.
+
+### Решение
+
+Выносим каждый алгоритм в отдельный класс, наследник общего интерфейса:
+
+```
+          ┌─────────────────────────────┐
+          │   IReadStrategy (abstract)  │
+          │─────────────────────────────│
+          │ + virtual ~IReadStrategy()  │
+          │ + read(path) = 0            │   ← чисто виртуальные функции
+          │ + name() = 0                │
+          └──────────────┬──────────────┘
+                         │ наследование
+          ┌──────────────┴──────────────┐
+          │                             │
+┌─────────────────────┐      ┌─────────────────────┐
+│  JsonReadStrategy   │      │  XlsxReadStrategy   │
+│  nlohmann/json      │      │  OpenXLSX           │
+└─────────────────────┘      └─────────────────────┘
+```
+
+Файлы:
+
+| Файл | Роль в паттерне |
+|------|-----------------|
+| [`reader/include/read_strategy.hpp`](strategy-example/reader/include/read_strategy.hpp) | Strategy — интерфейс |
+| [`reader/src/json_strategy.cpp`](strategy-example/reader/src/json_strategy.cpp) | ConcreteStrategy — JSON |
+| [`reader/src/xlsx_strategy.cpp`](strategy-example/reader/src/xlsx_strategy.cpp) | ConcreteStrategy — xlsx |
+| [`reader/src/strategy_factory.cpp`](strategy-example/reader/src/strategy_factory.cpp) | Factory — выбор стратегии по расширению |
+| [`app/main.cpp`](strategy-example/app/main.cpp) | Context — использует стратегию, не зная её типа |
+
+Добавить формат `.sql` = написать новый класс и дописать **одну ветку в фабрике**.
+Ни `main.cpp`, ни остальные стратегии при этом не меняются — это принцип
+open/closed: открыто для расширения, закрыто для изменения.
+
+### Механика: виртуальные функции и vtable
+
+```cpp
+class IReadStrategy {
+public:
+    virtual ~IReadStrategy() = default;                       // обязательно virtual!
+    virtual void read(const std::string& path) const = 0;     // = 0 → pure virtual
+    virtual std::string name() const = 0;
+};
+```
+
+- `= 0` делает функцию **чисто виртуальной**: реализации в базовом классе нет,
+  наследник обязан её определить. Класс становится **абстрактным** — создать
+  объект `IReadStrategy` напрямую нельзя.
+- У класса с виртуальными функциями компилятор создаёт **vtable** — массив адресов
+  реализаций, а в каждый объект добавляет скрытый указатель на эту таблицу.
+  Вызов `strategy->read(path)` разрешается не на этапе компиляции, а в рантайме:
+  берём указатель на таблицу из объекта, в таблице находим нужный слот, прыгаем
+  по адресу. Это **динамический полиморфизм**, и стоит он один лишний разыменованный
+  указатель на вызов.
+- `override` у наследника — просьба к компилятору проверить, что мы действительно
+  перекрываем виртуальную функцию базового класса, а не создаём новую из-за опечатки
+  или другой константности. Без `override` такая ошибка компилируется молча,
+  а вызываться будет метод базового класса.
+- **Виртуальный деструктор** обязателен для любого класса, который удаляют через
+  указатель на базовый тип. Без `virtual` при `delete` вызвался бы только
+  `~IReadStrategy()`, деструктор наследника не вызвался бы вовсе — undefined
+  behavior и утечка ресурсов.
+
+### Контекст: один `unique_ptr` на весь цикл
+
+```cpp
+std::unique_ptr<reader::IReadStrategy> strategy;   // тип — базовый, объект — наследника
+
+for (int i = 1; i < argc; ++i) {
+    const std::string path = argv[i];
+
+    strategy = reader::makeReadStrategy(path);     // подставляем нужную стратегию
+    if (!strategy) { /* неизвестное расширение */ continue; }
+
+    try {
+        strategy->read(path);                      // вызов через vtable
+    } catch (const std::exception& e) {
+        std::cerr << "ошибка чтения " << path << ": " << e.what() << "\n";
+    }
+}
+```
+
+`std::unique_ptr` — владеющий указатель: он единственный владелец объекта
+и удаляет его в своём деструкторе. При присваивании нового значения предыдущая
+стратегия удаляется автоматически (здесь и срабатывает виртуальный деструктор),
+поэтому `delete` руками писать не нужно и утечка невозможна даже при исключении.
+
+`try`/`catch` стоит **внутри** цикла: ошибка в одном файле не должна мешать
+обработать остальные.
+
+---
+
+## Сборка и запуск второй части
+
+```bash
+make build-strategy-example   # то же, что две команды ниже
+```
+
+```bash
+# первая конфигурация скачает json и OpenXLSX в build-strategy/_deps (нужен интернет)
+cmake -S strategy-example -B build-strategy
+# первая сборка небыстрая: собирается и сама OpenXLSX с miniz и pugixml
+cmake --build build-strategy -j
+
+cd strategy-example
+../build-strategy/bin/filereader data/employees.xlsx data/config.json
+```
+
+Пути к файлам — обычные аргументы командной строки, поэтому они считаются
+от текущего каталога, а не от каталога программы. Из корня репозитория то же
+самое выглядит так:
+
+```bash
+./build-strategy/bin/filereader strategy-example/data/employees.xlsx strategy-example/data/config.json
+```
+
+Ожидаемый вывод:
+
+```
+==== data/employees.xlsx  [XLSX (OpenXLSX)] ====
+лист "Сотрудники": 6 строк, 6 столбцов
++-----------------+-------------+----------------+------+----------+----------+
+| ФИО             | Должность   | Отдел          | Опыт | Зарплата | Удалёнка |
++-----------------+-------------+----------------+------+----------+----------+
+| Иванов Иван     | Разработчик | Платформа      | 5    | 320000   | 1        |
+| Петрова Анна    | Аналитик    | Данные         | 3    | 240000   | 0        |
+| Сидоров Пётр    | Тимлид      | Платформа      | 8    | 450000   | 1        |
+| Кузнецова Мария | QA-инженер  | Качество       | 2    | 180000   | 0        |
+| Орлов Дмитрий   | DevOps      | Инфраструктура | 6    | 360000   | 1        |
++-----------------+-------------+----------------+------+----------+----------+
+
+==== data/config.json  [JSON (nlohmann/json)] ====
+{
+  "course": "Программирование на C++",
+  "grading": {
+    "exam": 0.4,
+    ...
+```
+
+Файл `data/config.json` намеренно записан в одну строку без отступов — так видно
+работу `dump(2)`. Логические значения xlsx печатаются как `1`/`0`: так их выводит
+`operator<<` библиотеки OpenXLSX.
+
+Ошибочные ситуации обрабатываются по-разному:
+
+```bash
+cd strategy-example
+F=../build-strategy/bin/filereader
+
+$F data/notes.txt       # пропускаю data/notes.txt: неизвестное расширение файла
+$F data/missing.json    # ошибка чтения ...: не удалось открыть файл
+echo '{oops' > /tmp/bad.json && $F /tmp/bad.json   # ошибка разбора JSON
+```
+
+Код возврата программы — `0`, если все файлы прочитаны, и `1`, если хотя бы с одним
+возникла проблема.
+
+---
+
+## Справочник CMake-команд второй части
+
+| Команда / переменная | Назначение | Документация |
+|----------------------|-----------|--------------|
+| `include` | исполнить .cmake-файл в текущей области видимости | [→ docs](https://cmake.org/cmake/help/latest/command/include.html) |
+| `find_package` | найти библиотеку, установленную в системе | [→ docs](https://cmake.org/cmake/help/latest/command/find_package.html) |
+| `FetchContent_Declare` | описать, откуда брать зависимость | [→ docs](https://cmake.org/cmake/help/latest/module/FetchContent.html#command:fetchcontent_declare) |
+| `FetchContent_MakeAvailable` | скачать и подключить зависимость | [→ docs](https://cmake.org/cmake/help/latest/module/FetchContent.html#command:fetchcontent_makeavailable) |
+| `add_library(... INTERFACE)` | цель без исходников: только требования | [→ docs](https://cmake.org/cmake/help/latest/command/add_library.html#interface-libraries) |
+| `target_compile_options` | флаги компиляции для цели | [→ docs](https://cmake.org/cmake/help/latest/command/target_compile_options.html) |
+| `set(... CACHE BOOL "" FORCE)` | задать опцию подпроекта, объявленную через `option()` | [→ docs](https://cmake.org/cmake/help/latest/command/set.html#set-cache-entry) |
+| `CMAKE_RUNTIME_OUTPUT_DIRECTORY` | куда класть исполняемые файлы | [→ docs](https://cmake.org/cmake/help/latest/variable/CMAKE_RUNTIME_OUTPUT_DIRECTORY.html) |
+
+---
+
+## Упражнения
+
+1. Добавьте стратегию для `.csv`: новый класс + одна ветка в фабрике.
+   Сколько существующих файлов пришлось изменить?
+2. Сделайте в заголовке `xlsx_strategy.hpp` поле типа `OpenXLSX::XLDocument`.
+   Соберите проект — и объясните ошибку. Какое ключевое слово в
+   `target_link_libraries(reader ...)` нужно поменять, чтобы она исчезла?
+3. Замените `PUBLIC` на `PRIVATE` в `target_include_directories(reader ...)`.
+   Что перестанет компилироваться и почему?
+4. Уберите `virtual` у деструктора `IReadStrategy`, добавьте в `JsonReadStrategy`
+   поле `std::string` и печать в его деструкторе. Соберите проект — компилятор
+   промолчит даже с `-Wall -Wextra` (сам `delete` спрятан внутри шаблона
+   `unique_ptr`), а при запуске деструктор наследника не вызовется.
+   Затем пересоберите с санитайзером и запустите снова:
+   `cmake -S strategy-example -B build-asan -DCMAKE_CXX_FLAGS=-fsanitize=address` —
+   ASan сообщит `new-delete-type-mismatch`.
+5. Удалите папки сборки (`make clean`) и замерьте время полной сборки
+   (`time make build-strategy-example`).
+   Затем установите `nlohmann-json3-dev` в системе и повторите: что изменилось
+   в логе конфигурации?
