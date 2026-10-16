@@ -1,0 +1,43 @@
+{
+    "course": "Программирование на C++",
+    "semester": 1,
+    "year": 2026,
+    "instructor": {
+        "name": "Иванов И. И.",
+        "email": "ivanov@example.org",
+        "office": "R-404"
+    },
+    "seminars": [
+        {
+            "id": 1,
+            "topic": "CMake: цели, библиотеки, линковка",
+            "date": "2026-09-08",
+            "homework": true
+        },
+        {
+            "id": 2,
+            "topic": "Strategy и сторонние зависимости",
+            "date": "2026-10-16",
+            "homework": true
+        },
+        {
+            "id": 3,
+            "topic": "Шаблоны и STL",
+            "date": "2026-10-23",
+            "homework": false
+        }
+    ],
+    "grading": {
+        "homework": 0.4,
+        "seminars": 0.2,
+        "exam": 0.4
+    },
+    "tools": [
+        "git",
+        "cmake",
+        "gcc",
+        "clang-format"
+    ],
+    "strict_mode": true,
+    "max_students": null
+}
