@@ -19,6 +19,7 @@
 #      make build-all                собрать всё из корня (через ./CMakeLists.txt)
 #      make run-math                 собрать и запустить demo
 #      make run-strategy-example     собрать и запустить filereader на тестовых данных
+#      make run-hashdemo             собрать и запустить hashdemo (FileContent + хэшер)
 #      make clean                    удалить все папки сборки
 # ======================================================================================
 
@@ -32,7 +33,7 @@ BUILD_STRATEGY := build-strategy
 # .PHONY перечисляет цели, которые не создают файла с таким именем.
 # Без этого make решил бы, что цель build-math уже «готова», если рядом
 # случайно появится файл с именем build-math.
-.PHONY: all build-math build-strategy-example build-all run-math run-strategy-example clean
+.PHONY: all build-math build-strategy-example build-all run-math run-strategy-example run-hashdemo clean
 
 # Цель по умолчанию: просто `make` соберёт оба примера.
 all: build-math build-strategy-example
@@ -72,10 +73,16 @@ build-all:
 run-math: build-math
 	$(BUILD_MATH)/bin/demo
 
+# config.json передан дважды намеренно: второй раз filereader найдёт его
+# в unordered_map<FileContent, ...> и не будет печатать повторно.
 run-strategy-example: build-strategy-example
 	$(BUILD_STRATEGY)/bin/filereader \
 		strategy-example/data/employees.xlsx \
+		strategy-example/data/config.json \
 		strategy-example/data/config.json
+
+run-hashdemo: build-strategy-example
+	$(BUILD_STRATEGY)/bin/hashdemo
 
 clean:
 	rm -rf $(BUILD_ALL) $(BUILD_MATH) $(BUILD_STRATEGY)

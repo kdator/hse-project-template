@@ -1,6 +1,7 @@
 # ======================================================================================
 #  Пример 2: сторонние зависимости + паттерн Strategy
 #  Цель filereader: читает .json и .xlsx файлы, переданные в аргументах, и печатает их.
+#  Цель hashdemo:   FileContent как ключ unordered_map с пользовательским хэшером.
 # ======================================================================================
 #  Этот файл самодостаточен: папку можно собрать как отдельный проект
 #      cmake -S strategy-example -B build/strategy-example
@@ -66,3 +67,8 @@ add_executable(filereader app/main.cpp)
 # зависимостей. При этом заголовки этих библиотек filereader НЕ видит,
 # так как в reader они подключены как PRIVATE.
 target_link_libraries(filereader PRIVATE reader project_warnings)
+
+# Небольшая демонстрация FileContent и FileContentHasher из той же библиотеки reader:
+# operator+ / operator+=, коллизия хэшей, изменение ключа через extract.
+add_executable(hashdemo app/hash_demo.cpp)
+target_link_libraries(hashdemo PRIVATE reader project_warnings)

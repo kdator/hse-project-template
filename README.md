@@ -7,7 +7,7 @@
 | Папка | Цель | Что демонстрирует |
 |-------|------|-------------------|
 | [`math-example/`](math-example/) | `demo` | основы CMake: статическая библиотека, `add_subdirectory`, линковка |
-| [`strategy-example/`](strategy-example/) | `filereader` | сторонние зависимости и паттерн Strategy (см. [часть 2](#часть-2--сторонние-библиотеки-и-паттерн-strategy)) |
+| [`strategy-example/`](strategy-example/) | `filereader`, `hashdemo` | сторонние зависимости, паттерн Strategy и `unordered_map` с пользовательским хэшером (см. [часть 2](#часть-2--сторонние-библиотеки-и-паттерн-strategy)) |
 
 ## Структура репозитория
 
@@ -35,18 +35,21 @@ hse-project-template/
     ├── cmake/
     │   └── Dependencies.cmake      ← подключение сторонних библиотек (FetchContent)
     ├── app/
-    │   └── main.cpp                ← CLI filereader: разбор argv, выбор стратегии
+    │   ├── main.cpp                ← CLI filereader: разбор argv, выбор стратегии
+    │   └── hash_demo.cpp           ← hashdemo: FileContent + пользовательский хэшер
     ├── reader/                     ← библиотека стратегий чтения
     │   ├── CMakeLists.txt
     │   ├── include/
     │   │   ├── read_strategy.hpp       ← интерфейс IReadStrategy
     │   │   ├── json_strategy.hpp
     │   │   ├── xlsx_strategy.hpp
-    │   │   └── strategy_factory.hpp
+    │   │   ├── strategy_factory.hpp
+    │   │   └── file_content.hpp        ← FileContent и FileContentHasher
     │   └── src/
     │       ├── json_strategy.cpp       ← nlohmann/json
     │       ├── xlsx_strategy.cpp       ← OpenXLSX
-    │       └── strategy_factory.cpp
+    │       ├── strategy_factory.cpp
+    │       └── file_content.cpp
     └── data/                       ← тестовые файлы
         ├── employees.xlsx
         └── config.json
@@ -63,6 +66,7 @@ make build-strategy-example    # собрать пример 2         → build
 make build-all                 # собрать всё из корня     → build/bin/{demo,filereader}
 make run-math                  # собрать и запустить demo
 make run-strategy-example      # собрать и запустить filereader на тестовых данных
+make run-hashdemo              # собрать и запустить hashdemo
 make clean                     # удалить все папки сборки
 make                           # = build-math + build-strategy-example
 ```
@@ -652,6 +656,88 @@ for (int i = 1; i < argc; ++i) {
 
 ---
 
+## `FileContent` как ключ `unordered_map`
+
+Если передать `filereader` один и тот же файл дважды, второй раз он не печатается.
+Для этого `main.cpp` хранит уже обработанные файлы в ассоциативном контейнере,
+где **ключ — само содержимое файла**:
+
+```cpp
+std::unordered_map<reader::FileContent, std::string, reader::FileContentHasher> processed;
+//                 ключ: имя + байты    значение:   хэшер — третий шаблонный параметр
+//                                      имя стратегии
+```
+
+`FileContent` ([`file_content.hpp`](strategy-example/reader/include/file_content.hpp))
+хранит `std::vector<uint8_t> bytes_` и `std::string fileName_`.
+
+### Что нужно ключу `unordered_map`
+
+```cpp
+std::unordered_map<Key, Value, Hash = std::hash<Key>, KeyEqual = std::equal_to<Key>>
+```
+
+| Параметр | Зачем | Как сделано здесь |
+|----------|-------|-------------------|
+| `Hash` | ключ → `size_t` → номер корзины (bucket) | `struct FileContentHasher` с `operator()` |
+| `KeyEqual` | найти нужный ключ внутри корзины | по умолчанию `std::equal_to` → `FileContent::operator==` |
+
+Для `int` или `std::string` стандартная библиотека уже определяет `std::hash`,
+а для нашего класса — нет. Без третьего параметра код не скомпилируется.
+
+### Хэшер
+
+```cpp
+struct FileContentHasher {
+    std::size_t operator()(const FileContent& content) const;
+};
+```
+
+Это функтор: обычная структура с перегруженным `operator()`. Контейнер хранит
+его экземпляр и вызывает `hasher(key)` при каждой вставке и поиске. Хэш считается
+функцией FNV-1a по имени файла и **первым 32 байтам** содержимого. Так он считается
+быстро даже для огромных файлов. Обязательное правило:
+
+> `a == b` ⇒ `hash(a) == hash(b)`
+
+`operator==` сравнивает файлы целиком, поэтому правило выполняется. Обратное не
+требуется: файлы с одинаковым именем и одинаковым началом, но разным хвостом
+дают **коллизию**, то есть одинаковый хэш при разных ключах. Это корректно:
+оба элемента лягут в одну корзину, просто поиск в ней станет линейным.
+
+### `operator+` и `operator+=`
+
+```cpp
+FileContent& operator+=(const std::string& text);       // дописывает байты строки в себя
+FileContent  operator+(const std::string& text) const;  // копия + text, реализован через +=
+```
+
+### Почему ключ нельзя менять на месте
+
+Ключи в `unordered_map` константные (`it->first` имеет тип `const FileContent`).
+Если бы ключ можно было изменить, его хэш стал бы другим, а элемент остался бы
+в старой корзине, и найти его было бы уже невозможно. С C++17 ключ меняют так:
+`extract` → правка `node.key()` → `insert`.
+
+### `hashdemo`
+
+Всё перечисленное (`+`/`+=`, коллизию, `extract`) показывает отдельная небольшая
+программа [`app/hash_demo.cpp`](strategy-example/app/hash_demo.cpp). Она работает
+на данных в памяти и слинкована с той же библиотекой `reader`:
+
+```bash
+make run-hashdemo
+```
+
+```
+== коллизия: одно имя, одинаковые первые 32 байта ==
+  hash(v1) == hash(v2): true,  v1 == v2: false
+  элементов в корзине v1: 2
+...
+```
+
+---
+
 ## Сборка и запуск второй части
 
 ```bash
@@ -712,6 +798,7 @@ F=../build-strategy/bin/filereader
 $F data/notes.txt       # пропускаю data/notes.txt: неизвестное расширение файла
 $F data/missing.json    # ошибка чтения ...: не удалось открыть файл
 echo '{oops' > /tmp/bad.json && $F /tmp/bad.json   # ошибка разбора JSON
+$F data/config.json data/config.json   # второй раз: уже выведен выше, пропускаю
 ```
 
 Код возврата программы — `0`, если все файлы прочитаны, и `1`, если хотя бы с одним
@@ -754,3 +841,12 @@ echo '{oops' > /tmp/bad.json && $F /tmp/bad.json   # ошибка разбора
    (`time make build-strategy-example`).
    Затем установите `nlohmann-json3-dev` в системе и повторите: что изменилось
    в логе конфигурации?
+6. Сделайте так, чтобы `FileContentHasher` всегда возвращал `0`. Программа
+   останется корректной? Что покажет `bucket_size` в `hashdemo`?
+7. Уберите из `operator==` сравнение байтов, оставьте только имя. Какое правило
+   нарушится и что изменится в выводе `hashdemo`?
+8. Посмотрите первые 32 байта двух разных `.xlsx` (`xxd -l 32 файл.xlsx`).
+   Почему для xlsx (а это zip-архив) такой хэшер работает плохо?
+9. Вместо отдельного `FileContentHasher` специализируйте `std::hash<reader::FileContent>`
+   и уберите третий шаблонный параметр. А что придётся определить, если заменить
+   `std::unordered_map` на `std::map`?
