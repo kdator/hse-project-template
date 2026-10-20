@@ -2,11 +2,12 @@
 #  Библиотека reader: стратегии чтения файлов
 # ======================================================================================
 
-# Статическая библиотека из трёх .cpp файлов (см. семинар про CMake и libmath.a).
+# Статическая библиотека из четырёх .cpp файлов (см. семинар про CMake и libmath.a).
 add_library(reader STATIC
     src/json_strategy.cpp
     src/xlsx_strategy.cpp
     src/strategy_factory.cpp
+    src/file_content.cpp
 )
 
 # Наши собственные заголовки: PUBLIC, потому что их включает main.cpp.
